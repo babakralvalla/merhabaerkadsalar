@@ -29,44 +29,43 @@ jobs:
           # (Optional) Restart the Remote Desktop service to ensure changes take effect
           Restart-Service -Name TermService -Force
 
-      # Create or update RDP user with fixed password "deneme123"
-$plainPassword = "deneme123"
-$securePass = ConvertTo-SecureString $plainPassword -AsPlainText -Force
+      - name: Create RDP User with Fixed Password
+        run: |
+          # --- WARNING: using a fixed/plaintext password is insecure ---
+          $username = "RDP"
+          $plainPassword = "deneme123"
 
-# Eğer kullanıcı varsa sadece şifreyi güncelle, yoksa oluştur
-if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
-    try {
-        Set-LocalUser -Name "RDP" -Password $securePass
-        Write-Output "Kullanıcı 'RDP' bulundu — şifre güncellendi."
-    } catch {
-        Write-Error "Mevcut kullanıcının şifresi güncellenirken hata: $_"
-        exit 1
-    }
-} else {
-    try {
-        New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires -Description "RDP user"
-        Write-Output "Kullanıcı 'RDP' oluşturuldu."
-    } catch {
-        Write-Error "Kullanıcı oluşturulurken hata: $_"
-        exit 1
-    }
-}
+          # Convert to SecureString and create the user
+          $securePass = ConvertTo-SecureString $plainPassword -AsPlainText -Force
 
-# Gerekli gruplara ekle (hata oluşturursa devam etmesi için -ErrorAction SilentlyContinue kullanıldı)
-Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
-Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
+          # Remove existing user if present (optional, avoids duplication)
+          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
+              Write-Host "User $username already exists; attempting to remove first."
+              Remove-LocalUser -Name $username -ErrorAction SilentlyContinue
+          }
 
-# Giriş bilgilerini GitHub Actions ortam değişkenine ekle
-Add-Content -Path $env:GITHUB_ENV -Value "RDP_CREDS=User: RDP | Password: $plainPassword"
+          try {
+              New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -ErrorAction Stop
+          } catch {
+              Write-Error "Failed to create local user $username. Error: $_"
+              exit 1
+          }
 
-# Kontrol
-if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
-    Write-Error "Kullanıcı oluşturma / güncelleme başarısız."
-    exit 1
-} else {
-    Write-Output "İşlem tamamlandı."
-}
+          # Add to groups
+          Add-LocalGroupMember -Group "Administrators" -Member $username
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
 
+          # Expose credentials to subsequent steps (be cautious: this writes to the runner environment file)
+          echo "RDP_USER=$username" >> $env:GITHUB_ENV
+          echo "RDP_PASSWORD=$plainPassword" >> $env:GITHUB_ENV
+
+          # Verify
+          if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
+              Write-Error "User creation failed"
+              exit 1
+          } else {
+              Write-Host "User $username created successfully."
+          }
 
       - name: Install Tailscale
         run: |
@@ -113,8 +112,8 @@ if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
         run: |
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Address: $env:TAILSCALE_IP"
-          Write-Host "Username: RDP"
-          Write-Host "Password: $(echo $env:RDP_CREDS)"
+          Write-Host "Username: $env:RDP_USER"
+          Write-Host "Password: $env:RDP_PASSWORD"
           Write-Host "==================`n"
           
           # Keep runner active indefinitely (or until manually cancelled)
