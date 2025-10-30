@@ -33,7 +33,7 @@ jobs:
         run: |
           # --- WARNING: using a fixed/plaintext password is insecure ---
           $username = "RDP"
-          $plainPassword = "deneme123"
+          $plainPassword = "Deneme123!"
 
           # Convert to SecureString and create the user
           $securePass = ConvertTo-SecureString $plainPassword -AsPlainText -Force
