@@ -29,33 +29,44 @@ jobs:
           # (Optional) Restart the Remote Desktop service to ensure changes take effect
           Restart-Service -Name TermService -Force
 
-      - name: Create RDP User with Secure Password
-        run: |
-          Add-Type -AssemblyName System.Security
-          $charSet = @{
-              Upper   = [char[]](65..90)      # A-Z
-              Lower   = [char[]](97..122)     # a-z
-              Number  = [char[]](48..57)      # 0-9
-              Special = ([char[]](33..47) + [char[]](58..64) +
-                         [char[]](91..96) + [char[]](123..126)) # Special characters
-          }
-          $rawPassword = @()
-          $rawPassword += $charSet.Upper | Get-Random -Count 4
-          $rawPassword += $charSet.Lower | Get-Random -Count 4
-          $rawPassword += $charSet.Number | Get-Random -Count 4
-          $rawPassword += $charSet.Special | Get-Random -Count 4
-          $password = -join ($rawPassword | Sort-Object { Get-Random })
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
-          
-          echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
-          
-          if (-not (Get-LocalUser -Name "RDP")) {
-              Write-Error "User creation failed"
-              exit 1
-          }
+      # Create or update RDP user with fixed password "deneme123"
+$plainPassword = "deneme123"
+$securePass = ConvertTo-SecureString $plainPassword -AsPlainText -Force
+
+# Eğer kullanıcı varsa sadece şifreyi güncelle, yoksa oluştur
+if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
+    try {
+        Set-LocalUser -Name "RDP" -Password $securePass
+        Write-Output "Kullanıcı 'RDP' bulundu — şifre güncellendi."
+    } catch {
+        Write-Error "Mevcut kullanıcının şifresi güncellenirken hata: $_"
+        exit 1
+    }
+} else {
+    try {
+        New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires -Description "RDP user"
+        Write-Output "Kullanıcı 'RDP' oluşturuldu."
+    } catch {
+        Write-Error "Kullanıcı oluşturulurken hata: $_"
+        exit 1
+    }
+}
+
+# Gerekli gruplara ekle (hata oluşturursa devam etmesi için -ErrorAction SilentlyContinue kullanıldı)
+Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
+Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
+
+# Giriş bilgilerini GitHub Actions ortam değişkenine ekle
+Add-Content -Path $env:GITHUB_ENV -Value "RDP_CREDS=User: RDP | Password: $plainPassword"
+
+# Kontrol
+if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
+    Write-Error "Kullanıcı oluşturma / güncelleme başarısız."
+    exit 1
+} else {
+    Write-Output "İşlem tamamlandı."
+}
+
 
       - name: Install Tailscale
         run: |
